@@ -1,24 +1,19 @@
 let bFoeScriptsInit = false,
-    bStopExecution = false,
-    bWaitForEnter = false,
-    iAvailableFp = 999999,
-    iCurrentPlayer = 0,
-    oStandingArmy = new Set(),
-    oDamagedUnits = new Set(),
-    oReserveUnits = {},
-    oCanvas
+	bStopExecution = false,
+	bWaitForEnter = false,
+	bBluePrintReceived = false,
+	iAvailableFp = 999999,
+	iCurrentPlayer = 0,
+	oStandingArmy = new Set(),
+	oDamagedUnits = new Set(),
+	oReserveUnits = {},
+	oCanvas, 
+	iYourPlayerId
 
 const aFreeTavernOwners = new Set(),
-      bLogClickCoords = false, // console log mouse coordinates?
-      fArcFactor = 1.900,
-      aDontSnipePlayer = [
-		850144095, // LordBucketHead2020
-		849890007, // Jackie Wu Chang
-		849722971, // Jini 2212
-		2936755,   // Rancho277
-		7641957,   // Kakao79
-		5094384,   // Danae374
-	  ],
+	  bLogClickCoords = true, // console log mouse coordinates?
+	  fArcFactor = 1.900,
+	  aDontSnipePlayer = [], // Player IDs you don't want to snipe, use getPlayerIdOfPos() to get IDs
 	  aDontSnipeBuildings = [
 		"X_AllAge_Oracle", // Orakel
 		"X_BronzeAge_Landmark2", // Zeus
@@ -98,34 +93,31 @@ const aFreeTavernOwners = new Set(),
 	  	"startByBattleType", // BattlefieldService battle result
 	  	"collectReward", // RewardService battle reward
   	  ]
-      
+	  
 // Init scripts as soon as FoEproxy gets the first response
 FoEproxy.addHandler("all", "all", oResponse => {
 	// Only run once
 	if (bFoeScriptsInit) return
 	bFoeScriptsInit = true
 	
-    oCanvas = document.getElementsByTagName("canvas")[0]
+	oCanvas = document.getElementsByTagName("canvas")[0]
 
-    if (bLogClickCoords) {
-    	addEvent(oCanvas, "click", e => {
-    		say(e.pageX, e.pageY)
-    		//getPixelColor(e.pageX, e.pageY)
-		})
-    }
+	if (bLogClickCoords) {
+		addEvent(oCanvas, "click", e => say(e.pageX, e.pageY))
+	}
 
-    TavernService.start(false)
-    BlueprintService.start(false)
+	TavernService.start(false)
 
-    say("FoEscripts initiated")
+	say("FoEscripts initiated")
 })
 
-// Log relevant responses
+// Helper method to log incoming responses
 FoEproxy.addHandler("all", "all", oResponse => {
 	const sClass = oResponse.requestClass,
 		  mMethod = oResponse.requestMethod,
 		  oData = oResponse.responseData
-		  
+    
+    // Ignore certain know classes or methods
 	if (aIgnoreClasses.includes(sClass) || aIgnoreMethods.includes(mMethod)) {
 		return
 	}
@@ -139,6 +131,7 @@ FoEproxy.addHandler("GreatBuildingsService", "getAvailablePackageForgePoints", o
 	say(iAvailableFp + " FP left to spend")
 })
 
+// Your army composition
 FoEproxy.addHandler("ArmyUnitManagementService", "getArmyInfo", oResponse => {
 	// Reset stored values
 	oStandingArmy.clear()
@@ -160,6 +153,18 @@ FoEproxy.addHandler("ArmyUnitManagementService", "getArmyInfo", oResponse => {
 	})
 })
 
+// Received blueprint
+FoEproxy.addHandler("BlueprintService", "all", oResponse => {
+	say("Received blueprint")
+	bBluePrintReceived = true
+})
+
+// Your player ID
+FoEproxy.addHandler("StartupService", "getData", oResponse => {
+	iYourPlayerId = oResponse.responseData.user_data.player_id
+})
+ 
+
 
 
 // ------------------ //
@@ -172,7 +177,7 @@ const sleep = ms => {
 	return new Promise(resolve => setTimeout(resolve, ms + randPlusMinus()));
 }
 
-// Returns random value between -2 and 2. Used to randomize clicks and timeouts
+// Returns random value between -2 and 2. Used to randomize clicks
 function randPlusMinus() {
 	return Math.random() < 0.5 ? (Math.random() < 0.5 ? -2 : -1) : (Math.random() < 0.5 ? 2 : 1)
 }
@@ -185,27 +190,26 @@ function addEvent(el, evt, fn) {
 
 // ESC stops current execution
 addEvent(document, "keydown", e => {
-    if (e.key === "Escape") {
-        say("Stop execution")
-        bStopExecution = true
-    }
+	if (e.key === "Escape") {
+		say("Stop execution")
+		bStopExecution = true
+	}
 })
 
 // ENTER continues current paused execution
 addEvent(document, "keydown", e => {
-    if (e.key === "Enter") {
-        say("Continue execution")
-        bWaitForEnter = false
-    }
+	if (e.key === "Enter") {
+		say("Continue execution")
+		bWaitForEnter = false
+	}
 })
 
 // Wait for service response or timeout after given amount of milliseconds
 async function awaitResponse(sService, sMethod = "all", iWaitMs = 1500) {
-    const oAwaitResponse = new Promise(resolve => {
-        FoEproxy.addHandler(sService, sMethod, oResponse => resolve(oResponse))
-    })
-
-    return await Promise.race([oAwaitResponse, sleep(iWaitMs)])
+	const oAwaitResponse = new Promise(resolve => {
+		FoEproxy.addHandler(sService, sMethod, oResponse => resolve(oResponse))
+	})
+	return await Promise.race([oAwaitResponse, sleep(iWaitMs)])
 }
 
 function waitForEnter() {
@@ -220,102 +224,61 @@ function waitForEnter() {
 	})
 }
 
-function getPixelColor(x, y) {
-	return
-	
-	const oContext = oCanvas.getContext("webgl2"),
-		  oPixels = new Uint8Array(4)
-		  
-	let aRGB = [], iTry = 0
-		  
-    while (!aRGB.length || iTry < 100) {
-    	requestAnimationFrame(function() {
-		    oContext.readPixels(x, y, 1, 1, oContext.RGBA, oContext.UNSIGNED_BYTE, oPixels)
-		    if (oPixels[0] > 0 || oPixels[1] > 0 || oPixels[2] > 0) {
-		    	aRGB[0] = oPixels[0]
-		    	aRGB[1] = oPixels[1]
-		    	aRGB[2] = oPixels[2]
-		    	console.log(aRGB, aRGB.length, !aRGB.length, iTry)
-		    }
-			iTry++
-		})
-    }
-}
-
 
 // ------------------- //
 //   Service helpers   //
 // ------------------- //
 
 const TavernService = {
-    log: false,
+	log: false,
 	freeSeats: new Set(),
 	
 	start(log) {
-        this.log = log
-        
-        // Process complete list of taverns given while initialisation 
-        FoEproxy.addHandler("FriendsTavernService", "getOtherTavernStates", response => {
-        	response.responseData.forEach(oTavern => this.add(oTavern))
-        	say(this.freeSeats.size + " freie Tavernen")
-	    })
+		this.log = log
+		
+		// Process complete list of taverns given while initialisation 
+		FoEproxy.addHandler("FriendsTavernService", "getOtherTavernStates", response => {
+			response.responseData.forEach(oTavern => this.add(oTavern))
+			say(this.freeSeats.size + " freie Tavernen")
+		})
 
-        // Remember free tavern seats
+		// Remember free tavern seats
 		FoEproxy.addHandler("FriendsTavernService", "getOtherTavernState", response => {
 			this.add(response.responseData)
-	    })
+		})
 
-        // Remove visited tavern seats
-	    FoEproxy.addHandler("FriendsTavernService", "getSittingPlayersCount", response => {
-	    	const owner = response.responseData[0]
-	    	if (this.has(owner)) this.delete(owner)
-	    	if (this.freeSeats.size) this.logMsg(this.freeSeats)
-	    })
+		// Remove visited tavern seats
+		FoEproxy.addHandler("FriendsTavernService", "getSittingPlayersCount", response => {
+			const owner = response.responseData[0]
+			if (this.has(owner)) this.delete(owner)
+			if (this.freeSeats.size) this.logMsg(this.freeSeats)
+		})
 	},
 	
 	add(oTavern) {
 		const owner = oTavern.ownerId
-        		
+				
 		// Certain state or already collected?
 		if (oTavern?.state || this.has(owner)) {
-            return
-        }
-        
-    	this.logMsg("Free tavern slot at " + owner)
-    	this.freeSeats.add(owner)
+			return
+		}
+		
+		this.logMsg("Free tavern slot at " + owner)
+		this.freeSeats.add(owner)
 	},
 
-    has(owner) {
-        return this.freeSeats.has(owner)
-    },
-    
-    delete(owner) {
-        this.logMsg("Visited tavern slot at " + owner)
-    	this.freeSeats.delete(owner)
-    },
-
-    logMsg(msg) {
-        if (this.log) say(msg)
-    }
-}
-
-const BlueprintService = {
-    log: false,
-    received: false,
-
-    start(log) {
-        this.log = log
-
-	    // Remember received blueprint
-	    FoEproxy.addHandler("BlueprintService", "all", response => {
-	        this.logMsg("Received blueprint")
-	        this.received = true
-	    })
+	has(owner) {
+		return this.freeSeats.has(owner)
+	},
+	
+	delete(owner) {
+		this.logMsg("Visited tavern slot at " + owner)
+		this.freeSeats.delete(owner)
 	},
 
-    logMsg(msg) {
-        if (this.log) say(msg)
-    }
+	logMsg(msg) {
+		if (this.log) say(msg)
+	}
 }
 
 
@@ -333,10 +296,10 @@ async function clickCanvas(clickX, clickY, iRepeat = 0) {
 	clickY += randPlusMinus()
 
 	const oMouseDown = document.createEvent("MouseEvents"),
-	      oMouseUp = document.createEvent("MouseEvents")
-	      
-    // Draw cross
-    const oContext = oCanvas.getContext("webgl2")
+		  oMouseUp = document.createEvent("MouseEvents")
+		  
+	// Draw cross
+	const oContext = oCanvas.getContext("webgl2")
 
 	oMouseDown.initMouseEvent("mousedown", true, true, window, 0, 0, 0, clickX, clickY, false, false, false, false, 0, null)
 	oMouseUp.initMouseEvent("mouseup", true, true, window, 0, 0, 0, clickX, clickY, false, false, false, false, 0, null)
@@ -351,20 +314,9 @@ async function clickCanvas(clickX, clickY, iRepeat = 0) {
 	}
 }
 
-function typeIntoCanvas(sString) {
-	("" + sString).split("").forEach(async sChar => {
-		const iChar = sChar.charCodeAt(0), sCharCOde = "Digit" + sChar,
-			  oInitKey = {key: sChar, code: sCharCOde, char: iChar, keyCode: iChar, which: iChar},
-			  oKeyDown = new KeyboardEvent("keydown", oInitKey)
-			  oInput = document.querySelector("input")
-
-		oInput.dispatchEvent(oKeyDown)
-		await sleep(50)
-	})
-}
-
+// Just clicks somewhere outside of the current dialog
 async function closeDialog(sPage = "") {
-	if (false && sPage) whisper("Closing: " + sPage)
+	if (sPage) whisper("Closing: " + sPage)
 	await sleep(300)
 	await clickCanvas(45, 75)
 	await sleep(300)
@@ -387,22 +339,21 @@ async function closeDialog(sPage = "") {
 async function openPrevPage() {
 	say("Open prev page")
 	await sleep(300)
-	await clickCanvas(244, 657)
+	await clickCanvas(244, window.innerHeight - 65)
 	await sleep(300)
 }
 
-// "Moppel" n-th player
+// "Moppel" i.e. motivate n-th player
 async function moppelPlayer(iPlayerPos) {
-    BlueprintService.received = false
+	bBluePrintReceived = false
+	const iWindowHeight = window.innerHeight
 
 	//say(`Moppeling player ${iPlayerPos}`)
-	await clickCanvas(335 + (iPlayerPos - 1) * 100, 704)
+	await clickCanvas(315 + (iPlayerPos - 1) * 108, iWindowHeight - 15)
 	const oResponse = await awaitResponse("OtherPlayerService", "polivateRandomBuilding")
-	await sleep(100)
+	if (!oResponse) return false
 
-	if (typeof oResponse == "undefined") return false
-
-        if (BlueprintService.received) {
+	if (bBluePrintReceived) {
 		await closeDialog("Blueprint")
 	}
 	
@@ -410,7 +361,7 @@ async function moppelPlayer(iPlayerPos) {
 	const iOwnerId = oResponse.responseData.mapEntity?.player_id
 	if (TavernService.has(iOwnerId)) {
 		//say("Gonna have a drink as well")
-		await clickCanvas(350 + n * 108, 687)
+		await clickCanvas(350 + n * 108, iWindowHeight - 35)
 		await awaitResponse("FriendsTavernService", "getSittingPlayersCount")
 		await sleep(100)
 	}
@@ -441,9 +392,9 @@ async function moppelPages() {
 }
 
 // Opens list of great buildings of n-th player (zero-based)
-async function openGreatBuildingsPos(iPlayer) {
+async function openGreatBuildings(iPlayer) {
 	//say("Opening great buildings of player " + iPlayer)
-    await clickCanvas(349 + (iPlayer - 1) * 108, 663)
+	await clickCanvas(349 + (iPlayer - 1) * 108, window.innerHeight -60)
 
 	const oGreatBuildings = await awaitResponse("GreatBuildingsService", "getOtherPlayerOverview")
 	if (!oGreatBuildings) {
@@ -475,7 +426,13 @@ async function openGreatBuildingsPos(iPlayer) {
 
 // Opens n-th great building of opened building list
 async function openGreatBuilding(n) {
-	await clickCanvas(780, 281 + n * 29)
+	// Dynamicly calculate button position
+	const iDialogWidth = 725, iDialogHeight = 480, // Got those by checking dialog edge coordinates
+	      iWindowWidth = window.innerWidth, iWindowHeight = window.innerHeight,
+	      iDialogRightEdge = iWindowWidth - ((iWindowWidth - iDialogWidth) / 2),
+	      iDialogTopEdge = iWindowHeight - ((iWindowHeight - iDialogHeight) / 2)
+	      
+	await clickCanvas(iDialogRightEdge - 100, iDialogTopEdge + 125 + n * 29)
 	
 	const oGreatBuilding = await awaitResponse("OtherPlayerService", "getOtherPlayerCityMapEntity")
 	if (!oGreatBuilding) return []
@@ -509,7 +466,7 @@ async function snipePlayer(iPlayer) {
 	bStopExecution = bWaitForEnter = false
 
 	// Open list of players great buildings
-	let aGreatBuildings = await openGreatBuildingsPos(iPlayer)
+	let aGreatBuildings = await openGreatBuildings(iPlayer)
 	if (!aGreatBuildings) return
 	
 	if (aGreatBuildings.length) {
@@ -531,7 +488,7 @@ async function snipePlayer(iPlayer) {
 async function snipeGreatBuilding(oGB, iPlayer) {
 	await sleep(150)
 	const iDiff = oGB.needed - oGB.current,
-          aRankings = await openGreatBuilding(oGB.spot)
+		  aRankings = await openGreatBuilding(oGB.spot)
 
 	for (const iSpot in aRankings) {
 		const oRanking = aRankings[iSpot],
@@ -540,10 +497,10 @@ async function snipeGreatBuilding(oGB, iPlayer) {
 		for (let iPut = 0; iPut < Math.min(iArcReward, iDiff, iAvailableFp); iPut++) {
 			if ((iPut - oRanking.spent) >= (iDiff - iPut)) {
 				const iReward = iArcReward - iPut,
-				      fROI = Math.round(iReward * 100 / iPut)
+					  fROI = Math.round(iReward * 100 / iPut)
 				
 				if (iReward < 50 && fROI < 10) return
-				      
+					  
 				shout(`Snipe player ${iPlayer}'s ${oGB.name} (id ${oGB.id}) with ${iPut} FP for ${iReward} reward / ${fROI}% ROI!`)
 				bWaitForEnter = true
 				return
@@ -598,7 +555,7 @@ function snipeFrom(iPlayerPos) {
 
 function dontSnipePlayer(iPlayerId) {
 	//say("Check if we should snipe player id " + iPlayerId)
-	if (aDontSnipePlayer.includes(iPlayerId)) {
+	if (iPlayerId == iYourPlayerId || aDontSnipePlayer.includes(iPlayerId)) {
 		say("Not sniping player " + iPlayerId)
 		return true
 	}
@@ -618,15 +575,11 @@ function dontSnipeBuilding(sBuildingId) {
 
 async function getPlayerIdOfPos(n) {
 	//say("Opening great buildings of pos " + n)
-    await clickCanvas(349 + n * 108, 663)
+	await clickCanvas(349 + n * 108, window.innerHeight - 60)
 
-	const oGreatBuildings = await awaitResponse(
-		"GreatBuildingsService", 
-		"getOtherPlayerOverview"
-	)
-	
+	const oGreatBuildings = await awaitResponse("GreatBuildingsService",  "getOtherPlayerOverview")
 	if (!oGreatBuildings) {
-		whisper(`Pos ${n} doesn't have great buildings`)
+		whisper(`Pos ${n} doesn't have great buildings so we can't retreive its player ID`)
 		return false
 	}
 	
