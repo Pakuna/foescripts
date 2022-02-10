@@ -11,7 +11,7 @@ let bFoeScriptsInit = false,
 	iYourPlayerId
 
 const aFreeTavernOwners = new Set(),
-	  bLogClickCoords = true, // console log mouse coordinates?
+	  bLogClickCoords = false, // console log mouse coordinates?
 	  fArcFactor = 1.900,
 	  aDontSnipePlayer = [], // Player IDs you don't want to snipe, use getPlayerIdOfPos() to get IDs
 	  aDontSnipeBuildings = [
