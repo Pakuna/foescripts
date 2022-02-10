@@ -93,76 +93,85 @@ const aFreeTavernOwners = new Set(),
 	  	"startByBattleType", // BattlefieldService battle result
 	  	"collectReward", // RewardService battle reward
   	  ]
-	  
-// Init scripts as soon as FoEproxy gets the first response
-FoEproxy.addHandler("all", "all", oResponse => {
-	// Only run once
-	if (bFoeScriptsInit) return
-	bFoeScriptsInit = true
-	
-	oCanvas = document.getElementsByTagName("canvas")[0]
-
-	if (bLogClickCoords) {
-		addEvent(oCanvas, "click", e => say(e.pageX, e.pageY))
-	}
-
-	TavernService.start(false)
-
-	say("FoEscripts initiated")
-})
-
-// Helper method to log incoming responses
-FoEproxy.addHandler("all", "all", oResponse => {
-	const sClass = oResponse.requestClass,
-		  mMethod = oResponse.requestMethod,
-		  oData = oResponse.responseData
-    
-    // Ignore certain know classes or methods
-	if (aIgnoreClasses.includes(sClass) || aIgnoreMethods.includes(mMethod)) {
-		return
+  	  
+initScripts()
+function initScripts() {
+	if (typeof FoEproxy == "undefined") {
+		window.setTimeout(initScripts, 10)
 	}
 	
-	say(sClass, mMethod, oData)
-})
-
-// Update spendable FPs
-FoEproxy.addHandler("GreatBuildingsService", "getAvailablePackageForgePoints", oResponse => {
-	iAvailableFp = oResponse.responseData[0]
-	say(iAvailableFp + " FP left to spend")
-})
-
-// Your army composition
-FoEproxy.addHandler("ArmyUnitManagementService", "getArmyInfo", oResponse => {
-	// Reset stored values
-	oStandingArmy.clear()
-	oDamagedUnits.clear()
-	oReserveUnits = {"heavy": 0, "rogue": 0}
-	
-	oResponse.responseData.units.forEach(oUnit => {
-		if (oUnit?.is_attacking) oStandingArmy.add(oUnit)
+	// Init scripts as soon as FoEproxy gets the first response
+	FoEproxy.addHandler("all", "all", oResponse => {
+		// Only run once
+		if (bFoeScriptsInit) return
+		bFoeScriptsInit = true
 		
-		// Still enough HP left?
-		if (oUnit.currentHitpoints > 8) {
-			if (oUnit.unitTypeId == "rogue") oReserveUnits.rogue++
-			else if (oUnit.unitTypeId == "grenadier") oReserveUnits.heavy++
+		oCanvas = document.getElementsByTagName("canvas")[0]
+	
+		if (bLogClickCoords) {
+			addEvent(oCanvas, "click", e => say(e.pageX, e.pageY))
 		}
+	
+		TavernService.start(false)
+	
+		say("FoEscripts initiated")
 	})
 	
-	oStandingArmy.forEach(oUnit => {
-		if (oUnit.currentHitpoints < 9) oDamagedUnits.add(oUnit)
+	// Helper method to log incoming responses
+	FoEproxy.addHandler("all", "all", oResponse => {
+		const sClass = oResponse.requestClass,
+			  mMethod = oResponse.requestMethod,
+			  oData = oResponse.responseData
+	    
+	    // Ignore certain know classes or methods
+		if (aIgnoreClasses.includes(sClass) || aIgnoreMethods.includes(mMethod)) {
+			return
+		}
+		
+		say(sClass, mMethod, oData)
 	})
-})
+	
+	// Update spendable FPs
+	FoEproxy.addHandler("GreatBuildingsService", "getAvailablePackageForgePoints", oResponse => {
+		iAvailableFp = oResponse.responseData[0]
+		say(iAvailableFp + " FP left to spend")
+	})
+	
+	// Your army composition
+	FoEproxy.addHandler("ArmyUnitManagementService", "getArmyInfo", oResponse => {
+		// Reset stored values
+		oStandingArmy.clear()
+		oDamagedUnits.clear()
+		oReserveUnits = {"heavy": 0, "rogue": 0}
+		
+		oResponse.responseData.units.forEach(oUnit => {
+			if (oUnit?.is_attacking) oStandingArmy.add(oUnit)
+			
+			// Still enough HP left?
+			if (oUnit.currentHitpoints > 8) {
+				if (oUnit.unitTypeId == "rogue") oReserveUnits.rogue++
+				else if (oUnit.unitTypeId == "grenadier") oReserveUnits.heavy++
+			}
+		})
+		
+		oStandingArmy.forEach(oUnit => {
+			if (oUnit.currentHitpoints < 9) oDamagedUnits.add(oUnit)
+		})
+	})
+	
+	// Received blueprint
+	FoEproxy.addHandler("BlueprintService", "all", oResponse => {
+		say("Received blueprint")
+		bBluePrintReceived = true
+	})
+	
+	// Your player ID
+	FoEproxy.addHandler("StartupService", "getData", oResponse => {
+		iYourPlayerId = oResponse.responseData.user_data.player_id
+	})
+}
 
-// Received blueprint
-FoEproxy.addHandler("BlueprintService", "all", oResponse => {
-	say("Received blueprint")
-	bBluePrintReceived = true
-})
 
-// Your player ID
-FoEproxy.addHandler("StartupService", "getData", oResponse => {
-	iYourPlayerId = oResponse.responseData.user_data.player_id
-})
  
 
 
