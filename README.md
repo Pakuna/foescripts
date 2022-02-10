@@ -9,7 +9,7 @@ I'm using a Chrome extension called "User JavaScript and CSS" [1] (but I guess s
 
 Here are the commands I'm using:
 
-moppelPos(x) - Where x is a value of 0 to 4 (zero-based position of the player you want to motivate). Presses the "motivate" button (we call it "moppel" or just "helping" in german) and visits the tavern (if there's a free seat) of a single player in the list (neigbors, guild mates, friends) you have opened
+moppelPlayer(x) - Where x is a value of 1 to 5 (position of the player you want to motivate). Presses the "motivate" button (we call it "moppel" or just "helping" in german) and visits the tavern (if there's a free seat) of a single player in the list (neigbors, guild mates, friends) you have opened
 
 moppelFrom(x) - To motivate x players of your list of neighbors/friends/guild mates and visit free tavern seats. First you have to open the list you want to process and scroll to the right most position i.e. the end. Then, start the command in the console which the number of players you have in there and it'll start to go through the players from the end to beginning till it recognises, that there are no more buttons to press
 
