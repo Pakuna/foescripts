@@ -3,7 +3,7 @@ JS Helper to run tedious tasks like motivating friends and sniping your neighbou
 
 Depends on FoE Helper browser addon
 
-Please note - this snippet is pretty much work in progress and trimmed to my window size (quite a few static coordinates in there) to press certain dialog buttons and needs a bit of preparation from the user at this stage. There's a good chance it'll have problems on others systems. Happy to get some help to clean up/dynamicly calculate the coordinates to click.
+Please note - this snippet is pretty much work in progress and trimmed to my window size (quite a few static coordinates in there) to press certain dialog buttons and needs a bit of preparation from the user at this stage. There's a good chance it'll have problems on others systems. Happy to get some help.
 
 I'm using a Chrome extension called "User JavaScript and CSS" [1] (but I guess similar extensions work as well) to load the whole thing everytime the game loads i.e. https://XYZ.forgeofempires.com/ where XYZ is your server. Then I'm using the browser console to check for errors and start commands. Sometimes it needs a reload because it ran into a race-condition while loading FoE Helper. And because the whole thing is based on artificially moving the mouse for you, you shouldn't move the mouse in the game while a command runs or you'll confuse it! You can have another browser window (I'm watching youtube while the script does its thing) open, though. As long as it doesn't cover the one with FoE completly :)
 
