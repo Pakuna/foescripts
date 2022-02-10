@@ -391,18 +391,18 @@ async function openPrevPage() {
 	await sleep(300)
 }
 
-// "Moppel" n-th player (zero-based)
-async function moppelPos(n) {
+// "Moppel" n-th player
+async function moppelPlayer(iPlayerPos) {
     BlueprintService.received = false
 
-	//say(`Moppeling player ${n+1}`)
-	await clickCanvas(335 + n * 100, 704)
+	//say(`Moppeling player ${iPlayerPos}`)
+	await clickCanvas(335 + (iPlayerPos - 1) * 100, 704)
 	const oResponse = await awaitResponse("OtherPlayerService", "polivateRandomBuilding")
 	await sleep(100)
 
 	if (typeof oResponse == "undefined") return false
 
-    if (BlueprintService.received) {
+        if (BlueprintService.received) {
 		await closeDialog("Blueprint")
 	}
 	
@@ -423,8 +423,8 @@ async function moppelPages() {
 	bStopExecution = false
 	for (let iPage = 0; iPage < 99; iPage++) {
 		let iNotMoppeled = 0
-		for (let iPos = 0; iPos < 5; iPos++) {
-			const bMoppeled = await moppelPos(iPos)
+		for (let iPlayer = 1; iPlayer <= 5; iPlayer++) {
+			const bMoppeled = await moppelPlayer(iPlayer)
 			if (!bMoppeled) iNotMoppeled++
 			if (iNotMoppeled > 2) bStopExecution = true
 
