@@ -371,12 +371,12 @@ function initScripts() {
 	FoEproxy.addHandler("OtherPlayerService", "getSocialList", oResponse => {
 		oResponse.responseData.neighbours.forEach(oNeighbour => {
 			if (oNeighbour?.next_interaction_in) return
-			fsMoppel.neighbours.push(oNeighbour.player_id)
+			fsMotivate.neighbours.push(oNeighbour.player_id)
 		})
 		
 		oResponse.responseData.guildMembers.forEach(oGuildMember => {
 			if (oGuildMember?.next_interaction_in) return
-			fsMoppel.guildmembers.push(oGuildMember.player_id)
+			fsMotivate.guildmembers.push(oGuildMember.player_id)
 		})
 		
 		oResponse.responseData.friends.forEach((oFriend, i) => {
@@ -385,7 +385,7 @@ function initScripts() {
 			}
 			
 			if (oFriend?.next_interaction_in) return
-			fsMoppel.friends.push(oFriend.player_id)
+			fsMotivate.friends.push(oFriend.player_id)
 		})
 	})
 	
@@ -466,6 +466,13 @@ function wm() {
 	return window.innerWidth / 2
 }
 
+// Sets dialog top-left coordinates depending on current viewport and initial dialog position
+// All dialogs seem to have their initial placement done at 950px window width and 600px window height and are centered on the screen from thereon
+function setDialog(aDialog, iInitialX, iInitialY) {
+	aDialog[0] = window.innerWidth  <= 950 ? iInitialX : Math.floor(iInitialX + ((window.innerWidth  - 950) / 2))
+	aDialog[1] = window.innerHeight <= 600 ? iInitialY : Math.floor(iInitialY + ((window.innerHeight - 600) / 2))
+}
+
 
 addEvent(document, "keydown", e => {
 	// ENTER continues current paused execution
@@ -480,15 +487,15 @@ addEvent(document, "keydown", e => {
 	}
 	// Ctrl + Y starts motivating all players in opened social bar from right to left
 	else if (e.key === "y" && e.ctrlKey) {
-		moppelFrom(999)	
+		motivateFrom(999)	
 	}
 	// Ctrl + X starts sniping all players in opened social bar from right to left
 	else if (e.key === "x" && e.ctrlKey) {
 		snipeFrom(999)	
 	}
-	// Ctrl + C starts fight()
+	// Ctrl + C runs through currently opened fight
 	else if (e.key === "c" && e.ctrlKey) {
-		fight()	
+		fsFight.start()	
 	}
 	// Ctrl + A runs through currently opened negotiation
 	else if (e.key === "a" && e.ctrlKey) {
@@ -531,7 +538,7 @@ const TavernService = {
 		// Process complete list of taverns given while initialisation 
 		FoEproxy.addHandler("FriendsTavernService", "getOtherTavernStates", response => {
 			response.responseData.forEach(oTavern => this.add(oTavern))
-			say(this.freeSeats.size + " freie Tavernen")
+			say(this.freeSeats.size + " free taverns")
 		})
 
 		// Remember free tavern seats
@@ -661,11 +668,11 @@ async function openPrevPage() {
 	await sleep(300)
 }
 
-// "Moppel" i.e. motivate n-th player
-async function moppelPlayer(iPlayerPos) {
+// Motivates n-th player
+async function motivatePlayer(iPlayerPos) {
 	bBluePrintReceived = false
 
-	//say(`Moppeling player ${iPlayerPos}`)
+	//say(`Motivating player ${iPlayerPos}`)
 	await clickCanvas(315 + (iPlayerPos - 1) * 114, window.innerHeight - 15)
 	const oResponse = await awaitResponse("OtherPlayerService", "polivateRandomBuilding")
 	if (!oResponse) return false
@@ -687,21 +694,21 @@ async function moppelPlayer(iPlayerPos) {
 	return true
 }
 
-// "Moppel" n pages (descending) of five players each
-async function moppelPages() {
+// Motivate n pages (descending) of five players each
+async function motivatePages() {
 	bStopExecution = false
 	for (let iPage = 0; iPage < 99; iPage++) {
-		let iNotMoppeled = 0
+		let iNotMotivated = 0
 		for (let iPlayer = 1; iPlayer <= 5; iPlayer++) {
-			const bMoppeled = await moppelPlayer(iPlayer)
-			if (!bMoppeled) iNotMoppeled++
-			if (iNotMoppeled > 2) bStopExecution = true
+			const bMotivated = await motivatePlayer(iPlayer)
+			if (!bMotivated) iNotMotivated++
+			if (iNotMotivated > 2) bStopExecution = true
 
 			if (bWaitForEnter) {
 				await waitForEnter()
 			}
 			if (bStopExecution) {
-				say("Stopping execution of moppelPages()")
+				say("Stopping execution of motivatePages()")
 				return
 			}
 		}
@@ -868,9 +875,9 @@ async function snipePages(n) {
 	}
 }
 
-function moppelFrom(iPlayerPos) {
+function motivateFrom(iPlayerPos) {
 	const iPage = Math.ceil(iPlayerPos / 5)
-	moppelPages(iPage)
+	motivatePages(iPage)
 }
 
 function snipeFrom(iPlayerPos) {
@@ -1098,10 +1105,11 @@ const fsGBG = {
 	// The dialog top-left coordinates, while choosing to fight or negotiate
 	dialog: [],
 	
+	// Clicks fight button on currently opened region dialog and fights X rounds
 	fight: async function(iRounds = 1) {
 		bStopExecution = false
 		let bWon = true
-		this.setDialog()
+		setDialog(this.dialog, 317, 160)
 		
 		while (iRounds-- > 0 && bWon && !bStopExecution) {
 			await clickDialog(this.dialog, 65, 234)
@@ -1115,14 +1123,7 @@ const fsGBG = {
 			fsFight.mode = "gbg"
 			bWon = await fsFight.start()
 		}
-	},
-	
-	// Sets top left corner of GBG dialog
-	// Below 950px width and 600px height the dialog is initally positioned at 317, 160 and centers itself from thereon
-	setDialog: function() {
-		this.dialog[0] = window.innerWidth  <= 950 ? 317 : Math.floor(317 + ((window.innerWidth  - 950) / 2))
-		this.dialog[1] = window.innerHeight <= 600 ? 160 : Math.floor(160 + ((window.innerHeight - 600) / 2))
-	},
+	}
 }
 
 // Negotiations
@@ -1187,15 +1188,8 @@ const fsNegotiation = {
 		return true
 	},
 	
-	// Sets top left corner of negotiation dialog
-	// Below 950px width and 600px height the dialog is initally positioned at 55, 57 and centers itself from thereon
-	setDialog: function() {
-		this.dialog[0] = window.innerWidth  <= 950 ? 57 : Math.floor(57 + ((window.innerWidth  - 950) / 2))
-		this.dialog[1] = window.innerHeight <= 600 ? 55 : Math.floor(55 + ((window.innerHeight - 600) / 2))
-	},
-	
 	addGoods: async function() {
-		this.setDialog()
+		setDialog(this.dialog, 57, 55)
 		
 		const aSuggestions = Negotiation.GuessesSuggestions,
 		      oSuggest = aSuggestions[aSuggestions.length - 1],
@@ -1310,8 +1304,13 @@ const fsFight = {
 	mode: "gex",
 	army: {"heavy": 2, "range": 0, "rogue": 6},
 	
+	// The dialog top-left coordinates while fighting
+	dialog: [],
+	
 	start: async function() {
 		whisper("Start fighting")
+		
+		setDialog(this.dialog, 115, -12)
 		
 		// Try to replace damaged units
 		say("Replacing damaged units")
@@ -1516,26 +1515,26 @@ const fsFight = {
 }
 
 // Motivating other players
-const fsMoppel = {
+const fsMotivate = {
 	
 	neighbours: [],
 	guildmembers: [],
 	friends: [],
 	
 	start: async function() {
-		let iNotMoppeled = 0
+		let iNotMotivated = 0
 		bStopExecution = false
 		for (let iPage = 0; iPage < 99; iPage++) {
 			for (let iPlayer = 1; iPlayer <= 5; iPlayer++) {
-				const bMoppeled = await moppelPlayer(iPlayer)
-				if (!bMoppeled) iNotMoppeled++
-				if (iNotMoppeled > 2) bStopExecution = true
+				const bMotivated = await motivatePlayer(iPlayer)
+				if (!bMotivated) iNotMotivated++
+				if (iNotMotivated > 2) bStopExecution = true
 	
 				if (bWaitForEnter) {
 					await waitForEnter()
 				}
 				if (bStopExecution) {
-					say("Stopping execution of moppelPages()")
+					say("Stopping motivation")
 					return
 				}
 			}
