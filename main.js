@@ -5,11 +5,14 @@ let bFoeScriptsInit = false, iMaxInitTries = 100,
 	iAvailableFp = 999999,
 	iCurrentPlayer = 0,
 	oStandingArmy = new Set(),
-	oMissingUnits = new Set(),
-	oReplaceUnits = new Set(),
+	oMissingUnits = {},
+	oReplaceUnits = {},
+	oSnipedPlayers = new Set(),
 	oReserveUnits = {},
 	oCanvas, 
-	iYourPlayerId
+	iYourPlayerId,
+	iLastSnipedPlayerId,
+	fsArmy = {"heavy_melee": 1, "short_ranged": 0, "long_ranged": 1, "fast": 0, "light_melee": 0, "rogue": 6}
 
 const 
 	aFreeTavernOwners = new Set(),
@@ -25,28 +28,38 @@ const
 		"X_EarlyMiddleAge_Landmark3", // Galataturm
 	],
 	oIgnoreResponses = {
+		"AdvancementService": [
+			"getAll"	
+		],
 		"AnnouncementsService": [
 			"fetchAllAnnouncements"
 		],
 		"ArmyUnitManagementService": [
 			"getArmyInfo"	
 		],
+		"AutoAidService": [
+			"getStates"	
+		],
 		"BattlefieldService": [
 			"startByBattleType",
-			"getArmyPreview"
+			"getArmyPreview",
+			"surrenderWave"
 		],
 		"BlueprintService": [
 			"newReward",
 			"getGreatBuildingInventoryForGreatBuilding",
 			"unlockLevel",
-			"setUsed"
+			"setUsed",
+			"getUpdates"
 		],
 		"BonusService": [
 			"getLimitedBonuses",
 			"getBonuses"
 		],
 		"BoostService": [
-			"getAllBoosts"	
+			"getAllBoosts",
+			"getOverview",
+			"getTimerBoost"
 		],
 		"CampaignService": [
 			"getDeposits"	
@@ -68,7 +81,9 @@ const
 		"CityMapService": [
 			"getNextId",
 			"reset",
-			"updateEntity"
+			"updateEntity",
+			"getEntities",
+			"getCityMap"
 		],
 		"CityProductionService": [
 			"startProduction",
@@ -80,7 +95,8 @@ const
 			"getConversation",
 			"editMessage",
 			"markMessageRead",
-			"getOverviewForCategory"
+			"getOverviewForCategory",
+			"sendMessage"
 		],
 		"CrmService": [
 			"getContent"	
@@ -97,7 +113,7 @@ const
 			"getFriendSuggestions",
 			"deleteFriend"
 		],
-		"FriendsTavernService": [
+		/*"FriendsTavernService": [
 			"getSittingPlayersCount",
 			"getOtherTavernStates",
 			"getOtherTavernState",
@@ -105,12 +121,16 @@ const
 			"getConfig",
 			"getOwnTavern",
 			"collectReward"
+		],*/
+		"GrandPrizeService": [
+			"getGrandPrizes"
 		],
 		"GreatBuildingsService": [
 			"getConstruction",
 			"getOtherPlayerOverview",
 			"getAvailablePackageForgePoints",
-			"contributeForgePoints"
+			"contributeForgePoints",
+			"getContributions"
 		],
 		"GuildBattlegroundService": [
 			"getBattleground",
@@ -128,7 +148,8 @@ const
 			"getGuildReward",
 			"getDifficulties",
 			"changeDifficulty",
-			"getOverview"
+			"getOverview",
+			"getEncounter"
 		],
 		"GuildExpeditionNotificationService": [
 			"receiveDifficultyNotification"	
@@ -141,6 +162,7 @@ const
 			"getIgnoreList"
 		],
 		"InventoryService": [
+			"getItem",
 			"getItems",
 			"getItemAmount",
 			"getGreatBuildings"
@@ -153,6 +175,9 @@ const
 		],
 		"LogService": [
 			"setLogState"
+		],
+		"MerchantService": [
+			"getOverview"
 		],
 		"MessageService": [
 			"newMessage"
@@ -212,6 +237,9 @@ const
 		"SaleInfoService": [
 			"getActiveSales"
 		],
+		"SeasonalEventService": [
+			"initMainComponentsData"
+		],
 		"SettingsService": [
 			"updateSettings"	
 		],
@@ -221,8 +249,14 @@ const
 		"StaticDataService": [
 			"getMetadata"	
 		],
+		"TileGameService": [
+			"getTileGame"
+		],
 		"TimeService": [
 			"updateTime"
+		],
+		"TimedSpecialRewardService": [
+			"getTimedSpecial"
 		],
 		"TimerService": [
 			"getTimers"
@@ -281,53 +315,44 @@ function initScripts() {
 	
 	// Your army composition
 	FoEproxy.addHandler("ArmyUnitManagementService", "getArmyInfo", oResponse => {
-		const aUnitClasses = getUnitClasses()
+		const aUnitClasses = getUnitToClass()
 			
 		// Reset stored values
 		oStandingArmy.clear()
-		oMissingUnits = {...fsFight.army}
-		oReserveUnits = {"heavy": 0, "range": 0, "light": 0, "rogue": 0}
+		oMissingUnits = {...fsArmy}
+		resetReserveUnits()
 		resetReplaceUnits()
 		
 		oResponse.responseData.units.forEach(oUnit => {
-			const sUnitId = oUnit.unitTypeId, sClass = aUnitClasses[oUnit.unitTypeId]
-			//say(sUnitId, sClass)
-			
 			// Unit in use?
 			if (oUnit?.is_attacking) oStandingArmy.add(oUnit)
 			
-			// Still enough HP left?
+			// Don't care about color guards or military drummers..
+			const sClass = getUnitClass(oUnit)
+			if (!sClass) return
+			
+			// Still enough HP left? Add to reserve units
 			if (oUnit.currentHitpoints > 8) {
-				if (sUnitId == "rogue") oReserveUnits.rogue++
-				else if (sClass == "heavy_melee") {
-					//say("heavy", sUnitId)
-					oReserveUnits.heavy++
-				}
-				else if (sClass == "short_ranged") {
-					//say("range", sUnitId)
-					oReserveUnits.range++
-				}
-				else if (sClass == "light_melee" && oUnit.unitTypeId != "military_drummer") {
-					//say("light", sUnitId)
-					oReserveUnits.light++
-				}
+				oReserveUnits[sClass]++
 			}
 		})
 		
+		sortStandingArmy()
+		
+		// @TODO Maybe this one can be done within the forEach loop above..
 		oStandingArmy.forEach(oUnit => {
 			const sClass = getUnitClass(oUnit)
 			
+			// Don't care about color guards and military drummers..
+			if (!sClass) return
+			
 			// How many units are damaged
 			if (oUnit.currentHitpoints < 9) {
-				if (oUnit.unitTypeId == "rogue") oReplaceUnits.rogue++
-				if (sClass == "short_ranged") oReplaceUnits.range++
-				if (sClass == "heavy_melee") oReplaceUnits.heavy++
+				oReplaceUnits[sClass]++
 			}
 			
 			// How many units are missing
-			if (oUnit.unitTypeId == "rogue") oMissingUnits.rogue--
-			if (sClass == "short_ranged") oMissingUnits.range--
-			if (sClass == "heavy_melee") oMissingUnits.heavy--
+			oMissingUnits[sClass]--
 		})
 	})
 	
@@ -412,15 +437,49 @@ function initScripts() {
 }
 
 function getUnitClasses() {
-	return JSON.parse(localStorage.getItem("fsUnitClasses"))
+	return [...new Set(Object.values(getUnitClasses()))]
+}
+function getUnitToClass() {
+	let oClasses = JSON.parse(localStorage.getItem("fsUnitClasses"))
+	oClasses["rogue"] = "rogue"
+	return oClasses
 }
 function getUnitClass(oUnit) {
-	return getUnitClasses()[oUnit.unitTypeId]
+	if (["color_guard", "military_drummer"].includes(oUnit.unitTypeId)) return ""
+	return getUnitToClass()[oUnit.unitTypeId]
 }
 function resetReplaceUnits() {
-	oReplaceUnits = {...fsFight.army}
+	oReplaceUnits = {...fsArmy}
 	for (const sClass in oReplaceUnits) {
 		oReplaceUnits[sClass] = 0
+	}
+}
+function resetMissingUnits() {
+	oMissingUnits = {...fsArmy}
+	for (const sClass in oMissingUnits) {
+		oMissingUnits[sClass] = 0
+	}
+}
+function resetReserveUnits() {
+	oReserveUnits = {...fsArmy}
+	for (const sClass in oReserveUnits) {
+		oReserveUnits[sClass] = 0
+	}
+}
+function sortStandingArmy() {
+	let oSorted = {...fsArmy}
+	for (const sClass in oSorted) {
+		oSorted[sClass] = []
+	}
+	
+	oStandingArmy.forEach(oUnit => {
+		const sClass = getUnitClass(oUnit)
+		oSorted[sClass].push(oUnit)
+	})
+	
+	oStandingArmy = new Set()
+	for (const sClass in oSorted) {
+		oSorted[sClass].forEach(oUnit => oStandingArmy.add(oUnit))
 	}
 }
 
@@ -543,7 +602,9 @@ const TavernService = {
 
 		// Remember free tavern seats
 		FoEproxy.addHandler("FriendsTavernService", "getOtherTavernState", response => {
-			this.add(response.responseData)
+			const oTavern = response.responseData
+			if (oTavern?.state == "noChair") this.delete(oTavern.ownerId)
+			else this.add(oTavern)
 		})
 
 		// Remove visited tavern seats
@@ -625,18 +686,24 @@ async function clickCanvas(...aClick) {
 	}
 }
 
+// Clicks coords relative to given dialog
 async function clickDialog(aDialog, ...aClick) {
-	// First argument array of coords?
+	let clickX, clickY, iRepeat = 0
+	
+	// First argument is array of coords
 	if (Array.isArray(aClick[0]) && aClick[0].length == 2) {
-		aClick[0][0] += aDialog[0]
-		aClick[0][1] += aDialog[1]
+		clickX = aClick[0][0] + aDialog[0]
+		clickY = aClick[0][1] + aDialog[1]
+		iRepeat = aClick[1] ?? iRepeat
 	}
+	// First and second argument are the coords to click
 	else {
-		aClick[0] += aDialog[0]
-		aClick[1] += aDialog[1]
+		clickX = aClick[0] + aDialog[0]
+		clickY = aClick[1] + aDialog[1]
+		iRepeat = aClick[2] ?? iRepeat
 	}
 	//say("CLICK DIALOG", aClick[0], aClick[1])
-	return await clickCanvas(...aClick)
+	return await clickCanvas(clickX, clickY, iRepeat)
 }
 
 // Just clicks somewhere outside of the current dialog
@@ -732,7 +799,8 @@ async function openGreatBuildings(iPlayer) {
 		const oGreatBuilding = oGreatBuildings.responseData[iSpot]
 		
 		// Stop sniping if player is known to us
-		if (dontSnipePlayer(oGreatBuilding.player.player_id)) {
+		iLastSnipedPlayerId = oGreatBuilding.player.player_id
+		if (dontSnipePlayer(iLastSnipedPlayerId)) {
 			whisper("Not sniping player " + oGreatBuilding.player.player_id)
 			return false
 		}
@@ -793,9 +861,12 @@ async function openGreatBuilding(n) {
 }
 
 async function snipePlayer(iPlayer) {
-	// Open list of players great buildings
+	// Open players great buildings list
 	let aGreatBuildings = await openGreatBuildings(iPlayer)
 	if (!aGreatBuildings) return
+	
+	// Already sniped in this run?
+	if (oSnipedPlayers.has(iLastSnipedPlayerId)) return
 	
 	if (aGreatBuildings.length) {
 		if (iCurrentPlayer > 0) {
@@ -817,6 +888,7 @@ async function snipePlayer(iPlayer) {
 			
 			if (++iSniped > 10) break
 		}
+		oSnipedPlayers.add(iLastSnipedPlayerId)
 	}
 	else whisper("No buildings to snipe at player " + iPlayer)
 	
@@ -881,6 +953,7 @@ function motivateFrom(iPlayerPos) {
 }
 
 function snipeFrom(iPlayerPos) {
+	oSnipedPlayers.clear()
 	iCurrentPlayer = iPlayerPos
 	const iPages = Math.ceil(iPlayerPos / 5)
 	snipePages(iPages)
@@ -1302,15 +1375,31 @@ const fsNegotiation = {
 const fsFight = {
 	enemyArmies: 1,
 	mode: "gex",
-	army: {"heavy": 2, "range": 0, "rogue": 6},
 	
 	// The dialog top-left coordinates while fighting
 	dialog: [],
+	resultDialog: [],
+	
+	// Standing army unit coords
+	grid: [
+		[60, 220], [60, 285], [130, 220], [130, 285], [200, 220], [200, 285], [265, 220], [265, 285]
+	],
+	
+	// Button x-coords for unit class tabs
+	tabs: {
+		"fast": 160, 
+		"heavy_melee": 205, 
+		"light_melee": 250, 
+		"rogue": 250, 
+		"long_ranged": 295, 
+		"short_ranged": 340
+	},
 	
 	start: async function() {
 		whisper("Start fighting")
 		
 		setDialog(this.dialog, 115, -12)
+		setDialog(this.resultDialog, 180, 50)
 		
 		// Try to replace damaged units
 		say("Replacing damaged units")
@@ -1325,16 +1414,26 @@ const fsFight = {
 		// Start auto battle
 		say("Start first battle")
 		await clickCanvas(444, 629)
-		await awaitResponse("BattlefieldService", "startByBattleType")
+		const oBattle = await awaitResponse("BattlefieldService", "startByBattleType")
 		await sleep(200)
 		
 		if (this.enemyArmies > 1) {
-			say("Click next battle")
-			await clickCanvas(510, 625)
-		
-			//say("Fighting second wave")
-			await awaitResponse("BattlefieldService", "startByBattleType")
-			await sleep(200)
+			say("Second battle to fight")
+			if (this.onlyRoguesLeft(oBattle.responseData)) {
+				say("Withdraw from second battle")
+				await clickDialog(this.resultDialog, 110, 553)
+		        await sleep(300)
+				await clickDialog(this.resultDialog, 410, 408)
+				return false
+			}
+			else {
+				say("Click next auto battle")
+				await clickDialog(this.resultDialog, 295, 553 - 40) // -40 because dialog shows second wave
+			
+				//say("Fighting second wave")
+				await awaitResponse("BattlefieldService", "startByBattleType")
+				await sleep(200)
+			}
 		}
 			
 		say(`Click OK (${this.mode})`)
@@ -1342,7 +1441,7 @@ const fsFight = {
 			await clickCanvas(512, 584)
 		}
 		else {
-			await clickCanvas(512, 635)
+			await clickDialog(this.resultDialog, 290, 465)
 		}
 		
 		await sleep(300)
@@ -1366,19 +1465,58 @@ const fsFight = {
 		if (this.hasWrongUnits()) {
 			await this.replaceUnits2()
 			resetReplaceUnits()
-			oMissingUnits = this.army
+			resetMissingUnits()
 		}
 		
 		//say("replaceUnits", oReplaceUnits)
 		//say("missingUnits", oMissingUnits)
 		
-		// Add healthy range units
+		let iPrevUnits = 0
+		
+		for (const sClass in fsArmy) {
+			const iMissing = oMissingUnits[sClass]
+			let iReplace = oReplaceUnits[sClass]
+			      
+			if (!iMissing && !iReplace) {
+				iPrevUnits += fsArmy[sClass]
+				say("No need to add missing or replace damaged units")
+				continue
+			}
+			
+			await clickDialog(this.dialog, this.tabs[sClass], 365) // Change to unit class tab
+			
+			// Units missing?
+			if (iMissing > 0) {
+				// Make sure there is enough room to add missing units
+				await this.removeOverflow(iMissing)
+				
+				say(`Add missing ${iMissing} ${sClass}`)
+				await clickDialog(this.dialog, 140, 425, iMissing - 1) // Add new units from first slot
+			}
+			// Too many units of this class?
+			else if (iMissing < 0) {
+				const iRemove = Math.abs(iMissing)
+				say(`Remove ${iRemove} ${sClass}`, iPrevUnits, this.grid[iPrevUnits])
+				await clickDialog(this.dialog, this.grid[iPrevUnits], iRemove - 1)
+			}
+			
+			iPrevUnits += fsArmy[sClass]
+			
+			while (iReplace > 0) {
+				say(`Replace ${iReplace} damaged ${sClass}`, iPrevUnits - 1, this.grid[iPrevUnits - 1])
+				await clickDialog(this.dialog, this.grid[iPrevUnits - 1])
+				await clickDialog(this.dialog, 140, 425) // Add new unit from first slot
+				iReplace--
+			}
+		}
+		
+		/*// Add healthy range units
 		if (oMissingUnits.range || oReplaceUnits.range) {
-			await clickCanvas(495, 412) // Change to ranged units
+			await clickDialog(this.dialog, 340, 365) // Change to ranged units
 			
 			if (oMissingUnits.range > 0) {
 				say("Add missing ranged")
-				await clickCanvas(290, 480, oMissingUnits.range - 1) // Add missing range units
+				await clickDialog(this.dialog, 140, 425, oMissingUnits.range - 1) // Add missing range units
 			}
 			else if (oMissingUnits.range < 0) {
 				const iRemoveRanged = Math.abs(oMissingUnits.range)
@@ -1388,8 +1526,8 @@ const fsFight = {
 			
 			while (oReplaceUnits.range > 0) {
 				say(`Replace ${oReplaceUnits.range} damaged ranged`)
-				await clickCanvas(220, 265) // First slot of standing army
-				await clickCanvas(290, 480) // First slot of units
+				await clickDialog(this.dialog, 60, 215) // First slot of standing army
+				await clickDialog(this.dialog, 140, 425) // First slot of units
 				oReplaceUnits.range--
 			}
 		}
@@ -1436,7 +1574,7 @@ const fsFight = {
 				await clickCanvas(506, 547) // Add new rogue
 				oReplaceUnits.rogue--
 			}
-		}
+		}*/
 		
 		return true
 	},
@@ -1448,34 +1586,48 @@ const fsFight = {
 		}
 		
 		// Remove all units from standing army
-		await clickCanvas(220, 265, 8)
+		await clickDialog(this.dialog, 60, 215, 8)
 		
-		// Add healthy range units
-		if (this.army.range > 0) {
-			await clickCanvas(495, 412) // Change to ranged units
-			await clickCanvas(290, 480, this.army.range - 1)
-		}
-		
-		// Add healthy heavies
-		if (this.army.heavy > 0) {
-			await clickCanvas(356, 412) // Change to heavy view
-			await clickCanvas(290, 480, this.army.heavy - 1)
-		}
-		
-		// Add healthy rogues
-		if (this.army.rogue > 0) {
-			await clickCanvas(403, 412) // Change to light units
-			await clickCanvas(290, 480, this.army.rogue - 1)
+		for (const sClass in fsArmy) {
+			if (fsArmy[sClass] < 1) continue
+			
+			await clickDialog(this.dialog, this.tabs[sClass], 365) // Change to unit class tab
+			await clickDialog(this.dialog, 140, 425, fsArmy[sClass] - 1) // Click first slot to add
 		}
 		
 		return true
 	},
 	
+	// Removes X units of standing army and adds it to missing units if there's not enough space for X units
+	removeOverflow: async function(iRemove) {
+		const iFullArmySize = 8
+		
+		// Jump out right away if there's enough space
+		if (oStandingArmy.size + iRemove <= iFullArmySize) {
+			say("No overflow")
+			return
+		}
+		
+		// Slot in the grid to click to remove X units
+		const iSlot = iFullArmySize - iRemove
+		await clickDialog(this.dialog, this.grid[iSlot], iRemove)
+		
+		const aRemoved = [...oStandingArmy].slice(-iRemove)
+		aRemoved.forEach(oUnit => {
+			const sClass = getUnitClass(oUnit)
+			if (fsArmy[sClass] > 0) oMissingUnits[sClass]++
+		})
+		
+		oStandingArmy = new Set([...oStandingArmy].slice(0, -iRemove))
+		say(oStandingArmy)
+	},
+	
+	// Whether or not there are still enough reserve units left
 	checkReserveUnits: function() {
 		let bEnoughReserveUnits = true
-		for (const sClass in this.army) {
-			const iMinReserve = this.army[sClass], 
-				  iDiff = oReserveUnits[sClass] - iMinReserve
+		for (const sClass in fsArmy) {
+			const iDiff = oReserveUnits[sClass] - fsArmy[sClass]
+				  
 			if (iDiff < 0) {
 				say(`Missing ${-iDiff} ${sClass} units`)
 				bEnoughReserveUnits = false
@@ -1485,32 +1637,54 @@ const fsFight = {
 		return bEnoughReserveUnits
 	},
 	
+	// Whether or not there's a unit in the standing army that should not be standing
 	hasWrongUnits: function() {
 		let bHasWrongUnit = false
-		say(oStandingArmy, this.army)
-		oStandingArmy.forEach(oUnit => {
+		oStandingArmy.forEach(oStandingUnit => {
+			// Don't have to continue if previous unit was already wrong
 			if (bHasWrongUnit) return
 			
-			const sClass = getUnitClass(oUnit)
+			const sStandingUnitClass = getUnitClass(oStandingUnit)
 			
-			if (oUnit.unitTypeId == "rogue") {
-				//say("rogue", oUnit.unitTypeId, sClass, this.army.rogue < 1)
-				bHasWrongUnit = this.army.rogue < 1
-			}
-			else if (sClass == "short_ranged") {
-				//say("range", oUnit.unitTypeId, sClass, this.army.range < 1)
-				bHasWrongUnit = this.army.range < 1
-			}
-			else if (sClass == "heavy_melee") {
-				//say("heavy", oUnit.unitTypeId, sClass, this.army.heavy < 1)
-				bHasWrongUnit = this.army.heavy < 1
-			}
-			else {
-				say("wrong unit", oUnit.unitTypeId, sClass)
+			// No class i.e. color guard or military drummer
+			if (!sStandingUnitClass) {
 				bHasWrongUnit = true
+				return
+			}
+			
+			for (const sClass in fsArmy) {
+				// Don't have to continue if previous class was already wrong
+				if (bHasWrongUnit) return
+				bHasWrongUnit = getUnitClass(oStandingUnit) == sClass && fsArmy[sClass] < 1
 			}
 		})
 		return bHasWrongUnit
+	},
+	
+	unitsLeft: function(oBattle) {
+		let oMyUnitsLeft = {}
+		oBattle.state.unitsOrder.forEach(oUnit => {
+			
+			// Enemy units always have negative unit id
+			if (oUnit.unitId < 0) return
+			
+			// Only units with health points
+			if (!oUnit?.currentHitpoints) return
+			
+			// Increase count of unit class
+			const sUnitClass = getUnitClass(oUnit)
+			if (typeof oMyUnitsLeft[sUnitClass] == "undefined") oMyUnitsLeft[sUnitClass] = 1
+			oMyUnitsLeft[sUnitClass]++
+		})
+		return oMyUnitsLeft
+	},
+	
+	onlyRoguesLeft: function(oBattle) {
+		const oUnitsLeft = this.unitsLeft(oBattle),
+		      bOnlyRogues = JSON.stringify(oUnitsLeft) == JSON.stringify(["rogue"])
+		
+		if (bOnlyRogues) say("Only rogues left")
+        return bOnlyRogues
 	}
 }
 
