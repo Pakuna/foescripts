@@ -1,32 +1,40 @@
-let bFoeScriptsInit = false, iMaxInitTries = 100,
-	bStopExecution = false,
-	bWaitForEnter = false,
-	bBluePrintReceived = false,
-	iAvailableFp = 999999,
-	iCurrentPlayer = 0,
-	oStandingArmy = new Set(),
-	oMissingUnits = {},
-	oReplaceUnits = {},
-	oSnipedPlayers = new Set(),
-	oReserveUnits = {},
+let 
 	oCanvas, 
-	iYourPlayerId,
+	bFoeScriptsInit = false, iMaxInitTries = 100,
+	bStopExecution = false, // Whether or not currently running script should stop
+	bWaitForEnter = false, // Whether or not the scrips is currently waiting for the user to continue
+	bBluePrintReceived = false, // Whether or not we received a blueprint while motivating other players
+	iAvailableFp = 999999, // Gets updated everytime you spend FPs
+	oMissingUnits = {}, // Units that are missing/needless to reach fsArmy composition
+	oReplaceUnits = {}, // Units that have to be replaced
+	oReserveUnits = {}, // List of reserve units to use in standing army
+	iYourPlayerId, // Gets assigned by StartupService.getData and used to not snipe yourself
 	iLastSnipedPlayerId,
-	fsArmy = {"heavy_melee": 1, "short_ranged": 0, "long_ranged": 1, "fast": 0, "light_melee": 0, "rogue": 6}
+	fsArmy = { // The army composition you want to use for fights
+		"heavy_melee":  1, 
+		"short_ranged": 0, 
+		"long_ranged":  1, 
+		"fast":         0, 
+		"light_melee":  0, 
+		"rogue":        6
+	}
 
 const 
 	aFreeTavernOwners = new Set(),
+	oSnipedPlayers = new Set(), // List of players that were already sniped in the current run
+	oStandingArmy = new Set(), // Units in your current army
 	fArcFactor = 1.900,
-	iMinROI = 10, iMinFpReward = 50,
+	iMinROI = 10, iMinFpReward = 50, // Minimum percentual and absolute FP reward while sniping
 	aDontSnipePlayer = [], // Player IDs you don't want to snipe, use getPlayerIdOfPos() to get IDs
-	aDontSnipeBuildings = [
-		"X_AllAge_Oracle", // Orakel
+	aDontSnipeBuildings = [ // List of great buildings we don't care to snipe
+		"X_AllAge_Oracle", // Oracle
 		"X_BronzeAge_Landmark2", // Zeus
-		"X_IronAge_Landmark2", // Leuchtturm
+		"X_IronAge_Landmark2", // Lighthouse
 		"X_AllAge_EasterBonus4", // Observatorium
-		"X_BronzeAge_Landmark1", // Turm zu Babel
+		"X_BronzeAge_Landmark1", // Tower of Babel
 		"X_EarlyMiddleAge_Landmark3", // Galataturm
 	],
+	bIgnoreResponses = true, // Whether or not XHR responses should be console logged
 	oIgnoreResponses = {
 		"AdvancementService": [
 			"getAll"	
@@ -40,11 +48,11 @@ const
 		"AutoAidService": [
 			"getStates"	
 		],
-		"BattlefieldService": [
+		/*"BattlefieldService": [ // Working on relative button positions while fighting atm
 			"startByBattleType",
 			"getArmyPreview",
 			"surrenderWave"
-		],
+		],*/
 		"BlueprintService": [
 			"newReward",
 			"getGreatBuildingInventoryForGreatBuilding",
@@ -271,7 +279,7 @@ const
 			"getProgress"
 		]
 	}
-  	  
+
 initScripts()
 function initScripts() {
 	// Try again and again till FoE Helper is loaded
@@ -298,12 +306,12 @@ function initScripts() {
 		const sClass = oResponse.requestClass,
 			sMethod = oResponse.requestMethod,
 			oData = oResponse.responseData
-			  
+
 		// Response class and method ignored
-		if (sClass in oIgnoreResponses && (oIgnoreResponses[sClass].includes(sMethod) || oIgnoreResponses[sClass].length < 1)) {
+		if (bIgnoreResponses && sClass in oIgnoreResponses && (oIgnoreResponses[sClass].includes(sMethod) || oIgnoreResponses[sClass].length < 1)) {
 			return
 		}
-	    
+
 		say(sClass, sMethod, oData)
 	})
 	
@@ -528,7 +536,7 @@ function wm() {
 // Sets dialog top-left coordinates depending on current viewport and initial dialog position
 // All dialogs seem to have their initial placement done at 950px window width and 600px window height and are centered on the screen from thereon
 function setDialog(aDialog, iInitialX, iInitialY) {
-	aDialog[0] = window.innerWidth  <= 950 ? iInitialX : Math.floor(iInitialX + ((window.innerWidth  - 950) / 2))
+	aDialog[0] = window.innerWidth <= 950 ? iInitialX : Math.floor(iInitialX + ((window.innerWidth  - 950) / 2))
 	aDialog[1] = window.innerHeight <= 600 ? iInitialY : Math.floor(iInitialY + ((window.innerHeight - 600) / 2))
 }
 
@@ -546,11 +554,11 @@ addEvent(document, "keydown", e => {
 	}
 	// Ctrl + Y starts motivating all players in opened social bar from right to left
 	else if (e.key === "y" && e.ctrlKey) {
-		motivateFrom(999)	
+		motivatePages()
 	}
 	// Ctrl + X starts sniping all players in opened social bar from right to left
 	else if (e.key === "x" && e.ctrlKey) {
-		snipeFrom(999)	
+		startSniping()	
 	}
 	// Ctrl + C runs through currently opened fight
 	else if (e.key === "c" && e.ctrlKey) {
@@ -702,7 +710,7 @@ async function clickDialog(aDialog, ...aClick) {
 		clickY = aClick[1] + aDialog[1]
 		iRepeat = aClick[2] ?? iRepeat
 	}
-	//say("CLICK DIALOG", aClick[0], aClick[1])
+	say("CLICK DIALOG", aDialog, aClick, clickX, clickY)
 	return await clickCanvas(clickX, clickY, iRepeat)
 }
 
@@ -869,13 +877,6 @@ async function snipePlayer(iPlayer) {
 	if (oSnipedPlayers.has(iLastSnipedPlayerId)) return
 	
 	if (aGreatBuildings.length) {
-		if (iCurrentPlayer > 0) {
-			//say(`Checking ${aGreatBuildings.length} great buildings of player ` + iCurrentPlayer)
-		}
-		else { 
-			//say(`Checking ${aGreatBuildings.length} great buildings of player ` + iPlayer)
-		}
-			
 		// Check each of the great buildings
 		let iSniped = 0
 		for (const oGreatBuilding of aGreatBuildings) {
@@ -888,9 +889,10 @@ async function snipePlayer(iPlayer) {
 			
 			if (++iSniped > 10) break
 		}
-		oSnipedPlayers.add(iLastSnipedPlayerId)
 	}
 	else whisper("No buildings to snipe at player " + iPlayer)
+	
+	oSnipedPlayers.add(iLastSnipedPlayerId)
 	
 	await closeDialog("GB list")
 }
@@ -932,7 +934,6 @@ async function snipePages(n) {
 		//say("Checking great buildings of page " + (iPage + 1) + " of " + n)
 		for (let iPlayer = 1; iPlayer <= 5; iPlayer++) {
 			await snipePlayer(iPlayer)
-			iCurrentPlayer--
 
 			if (bWaitForEnter) {
 				await waitForEnter()
@@ -947,17 +948,9 @@ async function snipePages(n) {
 	}
 }
 
-function motivateFrom(iPlayerPos) {
-	const iPage = Math.ceil(iPlayerPos / 5)
-	motivatePages(iPage)
-}
-
-function snipeFrom(iPlayerPos) {
+function startSniping() {
 	oSnipedPlayers.clear()
-	iCurrentPlayer = iPlayerPos
-	const iPages = Math.ceil(iPlayerPos / 5)
-	snipePages(iPages)
-	iCurrentPlayer = 0
+	snipePages(28)
 }
 
 function dontSnipePlayer(iPlayerId) {
@@ -1185,7 +1178,7 @@ const fsGBG = {
 		setDialog(this.dialog, 317, 160)
 		
 		while (iRounds-- > 0 && bWon && !bStopExecution) {
-			await clickDialog(this.dialog, 65, 234)
+			await clickDialog(this.dialog, 65, 175)
 			const oArmyResponse = await awaitResponse("ArmyUnitManagementService", "getArmyInfo")
 			if (!oArmyResponse) {
 				say("Aborting attack")
@@ -1399,7 +1392,6 @@ const fsFight = {
 		whisper("Start fighting")
 		
 		setDialog(this.dialog, 115, -12)
-		setDialog(this.resultDialog, 180, 50)
 		
 		// Try to replace damaged units
 		say("Replacing damaged units")
@@ -1418,31 +1410,32 @@ const fsFight = {
 		await sleep(200)
 		
 		if (this.enemyArmies > 1) {
+			setDialog(this.resultDialog, 180, 10)
+			
 			say("Second battle to fight")
 			if (this.onlyRoguesLeft(oBattle.responseData)) {
 				say("Withdraw from second battle")
 				await clickDialog(this.resultDialog, 110, 553)
-		        await sleep(300)
+		    await sleep(300)
 				await clickDialog(this.resultDialog, 410, 408)
 				return false
 			}
 			else {
 				say("Click next auto battle")
-				await clickDialog(this.resultDialog, 295, 553 - 40) // -40 because dialog shows second wave
+				await clickDialog(this.resultDialog, 295, 553)
 			
 				//say("Fighting second wave")
 				await awaitResponse("BattlefieldService", "startByBattleType")
 				await sleep(200)
 			}
 		}
-			
+		
+		if (oBattle.responseData.state.ranking_data) setDialog(this.resultDialog, 180, 0)
+		else setDialog(this.resultDialog, 180, 53)
+		
 		say(`Click OK (${this.mode})`)
-		if (this.mode == "gex") {
-			await clickCanvas(512, 584)
-		}
-		else {
-			await clickDialog(this.resultDialog, 290, 465)
-		}
+		if (this.mode == "gex") await clickCanvas(512, 584)
+		else await clickDialog(this.resultDialog, 290, 570) // 570 2022-06-09
 		
 		await sleep(300)
 		if (bRewardReceived) {
@@ -1509,72 +1502,6 @@ const fsFight = {
 				iReplace--
 			}
 		}
-		
-		/*// Add healthy range units
-		if (oMissingUnits.range || oReplaceUnits.range) {
-			await clickDialog(this.dialog, 340, 365) // Change to ranged units
-			
-			if (oMissingUnits.range > 0) {
-				say("Add missing ranged")
-				await clickDialog(this.dialog, 140, 425, oMissingUnits.range - 1) // Add missing range units
-			}
-			else if (oMissingUnits.range < 0) {
-				const iRemoveRanged = Math.abs(oMissingUnits.range)
-				say(`Remove ${iRemoveRanged} ranged`)
-				await clickCanvas(220, 265, iRemoveRanged)
-			}
-			
-			while (oReplaceUnits.range > 0) {
-				say(`Replace ${oReplaceUnits.range} damaged ranged`)
-				await clickDialog(this.dialog, 60, 215) // First slot of standing army
-				await clickDialog(this.dialog, 140, 425) // First slot of units
-				oReplaceUnits.range--
-			}
-		}
-		
-		// Add healthy heavies
-		if (oMissingUnits.heavy || oReplaceUnits.heavy) {
-			await clickCanvas(356, 412) // Change to heavy view
-			
-			if (oMissingUnits.heavy > 0) {
-				say("Add missing heavy")
-				await clickCanvas(290, 480, oMissingUnits.heavy - 1) // Add missing heavy units
-			}
-			else if (oMissingUnits.heavy < 0) {
-				const iRemoveHeavy = Math.abs(oMissingUnits.heavy)
-				say(`Remove ${iRemoveHeavy} heavy`)
-				await clickCanvas(220, 340, iRemoveHeavy)
-			}
-			
-			while (oReplaceUnits.heavy > 0) {
-				say(`Replace ${oReplaceUnits.heavy} damaged heavy`)
-				await clickCanvas(220, 340) // Second slot of standing army
-				await clickCanvas(290, 480) // First slot of units
-				oReplaceUnits.heavy--
-			}
-		}
-		
-		// Add healthy rogues
-		if (oMissingUnits.rogue || oReplaceUnits.rogue) {
-			await clickCanvas(403, 412) // Change to light units
-			
-			if (oMissingUnits.rogue > 0) {
-				say(`Add ${oMissingUnits.rogue} missing rogues`)
-				await clickCanvas(506, 547, oMissingUnits.rogue - 1) // Depends heavily on number of light units!
-			}
-			else if (oMissingUnits.rogue < 0) {
-				const iRemoveRogue = Math.abs(oMissingUnits.rogue)
-				say(`Remove ${iRemoveRogue} rogues`)
-				await clickCanvas(220, 340, iRemoveRogue)
-			}
-			
-			while (oReplaceUnits.rogue > 0) {
-				say(`Replace ${oReplaceUnits.rogue} damaged rogues`)
-				await clickCanvas(412, 336) // Third slot of standing army
-				await clickCanvas(506, 547) // Add new rogue
-				oReplaceUnits.rogue--
-			}
-		}*/
 		
 		return true
 	},
